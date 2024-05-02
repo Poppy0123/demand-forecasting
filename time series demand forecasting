@@ -1,0 +1,544 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+from statsmodels.tsa.seasonal import seasonal_decompose
+from statsmodels.tsa.stattools import adfuller
+from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+import itertools
+
+# Load the dataset
+file_path = 'HITRUST+Hair_Sales+by++ProductService+Detail (4).csv'
+sales_data = pd.read_csv(file_path)
+
+sales_data.head(), sales_data.info()
+
+# clean the data
+cleaned_data = sales_data.dropna(subset=['Product/Service', 'Sales Price', 'Qty'])
+
+# Convert 'Date' to datetime format
+cleaned_data['Date'] = pd.to_datetime(cleaned_data['Date'], errors='coerce')
+
+# Remove non-numeric characters from 'Sales Price' and 'Amount', then convert to float
+cleaned_data['Sales Price'] = pd.to_numeric(cleaned_data['Sales Price'].str.replace('[^\d.]', '', regex=True), errors='coerce')
+cleaned_data['Amount'] = pd.to_numeric(cleaned_data['Amount'].str.replace('[^\d.]', '', regex=True), errors='coerce')
+
+cleaned_data.info()
+
+# Summary statistics for 'Sales Price', 'Qty', and 'Amount'
+summary_stats = cleaned_data[['Sales Price', 'Qty', 'Amount']].describe()
+
+# Total sales overview
+total_sales = cleaned_data['Amount'].sum()
+average_sales_price = cleaned_data['Sales Price'].mean()
+average_qty_sold = cleaned_data['Qty'].mean()
+
+# Top selling products by quantity and their average prices
+top_products_qty = cleaned_data.groupby('Product/Service')['Qty'].sum().sort_values(ascending=False).head(10)
+top_products_avg_price = cleaned_data.groupby('Product/Service')['Sales Price'].mean().loc[top_products_qty.index]
+
+summary_stats, total_sales, average_sales_price, average_qty_sold, top_products_qty, top_products_avg_price
+
+# Group data 
+sales_over_time = cleaned_data.groupby('Date').agg({'Amount': 'sum', 'Qty': 'sum'})
+
+# Plotting the total sales
+fig, ax = plt.subplots(2, 1, figsize=(14, 10), sharex=True)
+
+ax[0].plot(sales_over_time.index, sales_over_time['Amount'], label='Total Sales ($)', color='blue')
+ax[0].set_title('Total Sales Amount Over Time')
+ax[0].set_ylabel('Total Sales ($)')
+ax[0].legend()
+
+# Plotting the total quantity 
+ax[1].plot(sales_over_time.index, sales_over_time['Qty'], label='Total Quantity Sold', color='green')
+ax[1].set_title('Total Sales Volume Over Time')
+ax[1].set_ylabel('Total Quantity Sold')
+ax[1].set_xlabel('Date')
+ax[1].legend()
+
+plt.tight_layout()
+plt.show()
+
+
+combined_product_name = 'VA+ BW 24" Combined'
+cleaned_data['Product/Service Combined'] = cleaned_data['Product/Service'].replace({'VA+ BW 24”': combined_product_name, 'VIP:VA+ BW 24"': combined_product_name})
+
+# Group data by Date for the combined product category
+combined_product_sales = cleaned_data[cleaned_data['Product/Service Combined'] == combined_product_name].groupby('Date').agg({'Amount': 'sum', 'Qty': 'sum'})
+
+# Plotting the sales trends 
+fig, ax = plt.subplots(2, 1, figsize=(14, 10), sharex=True)
+
+ax[0].plot(combined_product_sales.index, combined_product_sales['Amount'], label='Total Sales ($)', color='purple')
+ax[0].set_title('Total Sales Amount Over Time for VA+ BW 24" Combined')
+ax[0].set_ylabel('Total Sales ($)')
+ax[0].legend()
+
+ax[1].plot(combined_product_sales.index, combined_product_sales['Qty'], label='Total Quantity Sold', color='orange')
+ax[1].set_title('Total Sales Volume Over Time for VA+ BW 24" Combined')
+ax[1].set_ylabel('Total Quantity Sold')
+ax[1].set_xlabel('Date')
+ax[1].legend()
+
+plt.tight_layout()
+plt.show()
+
+# Resample the data to monthly frequency for detailed analysis
+monthly_sales = combined_product_sales.resample('M').sum()
+
+# Plotting monthly trends
+fig, ax = plt.subplots(2, 1, figsize=(14, 12), sharex=True)
+
+ax[0].plot(monthly_sales.index, monthly_sales['Amount'], label='Monthly Sales ($)', color='red')
+ax[0].set_title('Monthly Sales Amount for VA+ BW 24" Combined')
+ax[0].set_ylabel('Sales Amount ($)')
+ax[0].legend()
+
+ax[1].plot(monthly_sales.index, monthly_sales['Qty'], label='Monthly Quantity Sold', color='blue')
+ax[1].set_title('Monthly Sales Volume for VA+ BW 24" Combined')
+ax[1].set_ylabel('Quantity Sold')
+ax[1].set_xlabel('Month')
+ax[1].legend()
+
+plt.tight_layout()
+plt.show()
+
+# Yearly trends - sum of sales and quantities by year
+yearly_sales = combined_product_sales.resample('A').sum()
+yearly_sales
+
+
+# Decompose the time series
+decomposition = seasonal_decompose(monthly_sales['Amount'], model='additive', period=12)
+
+# Plotting the decomposed components
+fig, axes = plt.subplots(4, 1, figsize=(14, 8))
+
+axes[0].plot(decomposition.observed, label='Observed')
+axes[0].set_title('Observed')
+axes[0].legend()
+
+axes[1].plot(decomposition.trend, label='Trend')
+axes[1].set_title('Trend')
+axes[1].legend()
+
+axes[2].plot(decomposition.seasonal, label='Seasonal')
+axes[2].set_title('Seasonal')
+axes[2].legend()
+
+axes[3].plot(decomposition.resid, label='Residual')
+axes[3].set_title('Residual')
+axes[3].legend()
+
+plt.tight_layout()
+plt.show()
+
+# Conduct the Augmented Dickey-Fuller test
+adf_result = adfuller(monthly_sales['Amount'].dropna())
+
+adf_result
+
+
+
+#plotting ACF and PACF
+fig, axes = plt.subplots(2, 1, figsize=(12, 8))
+
+# ACF plot
+plot_acf(monthly_sales['Amount'], lags=12, ax=axes[0])
+axes[0].set_title('Autocorrelation Function')
+
+# PACF plot 
+plot_pacf(monthly_sales['Amount'], lags=12, ax=axes[1], method='ywm')
+axes[1].set_title('Partial Autocorrelation Function')
+
+plt.tight_layout()
+plt.show()
+
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+
+# Setting the SARIMA parameters
+p, d, q = 1, 0, 1  
+P, D, Q, m = 1, 1, 1, 12  # Seasonal parameters
+
+# Fit the SARIMA model
+sarima_model = SARIMAX(monthly_sales['Amount'],
+                       order=(p, d, q),
+                       seasonal_order=(P, D, Q, m),
+                       enforce_stationarity=False,
+                       enforce_invertibility=False)
+sarima_results = sarima_model.fit()
+
+# Show the summary of the model
+sarima_results.summary()
+
+# Forecasting
+forecast = sarima_results.get_forecast(steps=12)
+forecast_conf_int = forecast.conf_int()
+
+# Plotting the forecast alongside historical data
+plt.figure(figsize=(12, 6))
+plt.plot(monthly_sales.index, monthly_sales['Amount'], label='Historical Sales')
+plt.plot(forecast.predicted_mean.index, forecast.predicted_mean, label='Forecasted Sales', color='red')
+plt.fill_between(forecast_conf_int.index,
+                 forecast_conf_int.iloc[:, 0],
+                 forecast_conf_int.iloc[:, 1], color='pink', alpha=0.3)
+plt.title('Sales Forecast for Next 12 Months')
+plt.xlabel('Date')
+plt.ylabel('Sales Amount ($)')
+plt.legend()
+plt.show()
+
+# Set the last 3 months of data as the test set for validation
+train_data = monthly_sales['Qty'][:-3]
+test_data = monthly_sales['Qty'][-3:]
+
+# Fit the SARIMA model to the training data
+sarima_train_model = SARIMAX(train_data, order=order, seasonal_order=seasonal_order)
+sarima_train_results = sarima_train_model.fit()
+
+# Forecast the test period
+forecast_values = sarima_train_results.forecast(steps=3)
+
+# Combine actual and forecasted data to compare
+validation_df = pd.DataFrame({
+    'Actual Quantity': test_data,
+    'Forecasted Quantity': forecast_values
+})
+
+# Calculate error metrics (MAE and RMSE)
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+
+mae = mean_absolute_error(validation_df['Actual Quantity'], validation_df['Forecasted Quantity'])
+rmse = mean_squared_error(validation_df['Actual Quantity'], validation_df['Forecasted Quantity'], squared=False)
+
+validation_df, mae, rmse
+
+#adjusting the model parameters
+import itertools
+
+
+p = d = q = range(0, 3)
+P = D = Q = range(0, 3)
+s = 12  
+
+# Create a list of all possible combinations of p, d, q and seasonal P, D, Q
+pdq = list(itertools.product(p, d, q))
+seasonal_pdq = [(x[0], x[1], x[2], s) for x in list(itertools.product(P, D, Q))]
+
+best_aic = float("inf")
+best_params = None
+best_seasonal_params = None
+
+for param in pdq:
+    for param_seasonal in seasonal_pdq:
+        try:
+            mod = SARIMAX(monthly_sales,
+                          order=param,
+                          seasonal_order=param_seasonal,
+                          enforce_stationarity=False,
+                          enforce_invertibility=False)
+
+            results = mod.fit()
+            
+            if results.aic < best_aic:
+                best_aic = results.aic
+                best_params = param
+                best_seasonal_params = param_seasonal
+        except:
+            continue
+
+best_params, best_seasonal_params, best_aic
+
+weekly_sales = combined_product_sales.resample('W').sum()
+
+weekly_data = combined_product_sales['Qty'].resample('W').sum()
+# Plot the weekly data to observe trends
+weekly_data.plot(title="Weekly Quantity Sold")
+plt.xlabel("Date")
+plt.ylabel("Quantity Sold")
+plt.show()
+
+# Decompose the time series
+decomposition = seasonal_decompose(weekly_sales['Amount'], model='additive', period=12)
+
+# Plotting the decomposed components
+fig, axes = plt.subplots(4, 1, figsize=(14, 8))
+
+axes[0].plot(decomposition.observed, label='Observed')
+axes[0].set_title('Observed')
+axes[0].legend()
+
+axes[1].plot(decomposition.trend, label='Trend')
+axes[1].set_title('Trend')
+axes[1].legend()
+
+axes[2].plot(decomposition.seasonal, label='Seasonal')
+axes[2].set_title('Seasonal')
+axes[2].legend()
+
+axes[3].plot(decomposition.resid, label='Residual')
+axes[3].set_title('Residual')
+axes[3].legend()
+
+plt.tight_layout()
+plt.show()
+
+# Conduct the Augmented Dickey-Fuller test
+adf_result = adfuller(weekly_sales['Amount'].dropna())
+
+adf_result
+
+order = (1, 0, 1)
+seasonal_order = (1, 1, 1, 52)  # Assuming yearly seasonality in weekly data
+
+# Fit the SARIMA model
+model = SARIMAX(weekly_data, order=order, seasonal_order=seasonal_order)
+results = model.fit()
+
+# Forecast the next two weeks
+forecast = results.forecast(steps=2)
+
+# Print the forecast
+print(forecast)
+
+from sklearn.model_selection import TimeSeriesSplit
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+
+
+
+tscv = TimeSeriesSplit(n_splits=5)  # Adjust splits based on data size
+
+errors = []
+
+for train_index, test_index in tscv.split(weekly_data):
+    train, test = weekly_data.iloc[train_index], weekly_data.iloc[test_index]
+    model = SARIMAX(train, order=(1,0,1), seasonal_order=(1,1,1,12))
+    result = model.fit()
+    predictions = result.forecast(len(test))
+    error = mean_squared_error(test, predictions, squared=False)  # RMSE
+    errors.append(error)
+
+average_rmse = np.mean(errors)
+print("Average RMSE:", average_rmse)
+
+history = [x for x in train_data]  # Initial training data
+predictions = []
+for t in range(len(test_data)):
+    model = SARIMAX(history, order=(1,0,1), seasonal_order=(1,1,1,12))
+    model_fit = model.fit(disp=0)
+    output = model_fit.forecast()
+    yhat = output[0]
+    predictions.append(yhat)
+    obs = test_data[t]
+    history.append(obs)  # Add actual observation to history for the next loop
+    print('predicted=%f, expected=%f' % (yhat, obs))
+
+# Evaluate forecasts
+rmse = mean_squared_error(test_data, predictions, squared=False)
+print('Test RMSE: %.3f' % rmse)
+
+
+#  random forest model
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+import numpy as np
+
+# Fill missing values in 'Sales Price' with the median of the column
+median_sales_price = features['Sales Price'].median()
+features['Sales Price'].fillna(median_sales_price, inplace=True)
+
+# Verify if all NaNs are filled
+features.info()
+
+# Retry training the model
+X_train, X_test, y_train, y_test = train_test_split(features, target, test_size=0.2, random_state=42)
+rf_model = RandomForestRegressor(n_estimators=100, random_state=42)
+rf_model.fit(X_train, y_train)
+
+# Predicting on the test set
+y_pred = rf_model.predict(X_test)
+
+# Calculate the Mean Absolute Error and Root Mean Squared Error
+mae = mean_absolute_error(y_test, y_pred)
+rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+
+mae, rmse
+
+# Generate additional future dates to cover February 1, 2024, to February 14, 2024
+additional_future_dates = [last_date + DateOffset(days=x) for x in range(14, 28)]  # Generating dates from Feb 1 to Feb 14
+
+# Prepare the input features for the additional future dates
+additional_future_features = pd.DataFrame({
+    'Year': [date.year for date in additional_future_dates],
+    'Month': [date.month for date in additional_future_dates],
+    'Sales Price': [assumed_sales_price] * len(additional_future_dates)
+})
+
+# Forecasting demand using the Random Forest model for additional dates
+additional_predicted_demand = rf_model.predict(additional_future_features)
+
+# Combine both forecast periods
+complete_future_dates = future_dates + additional_future_dates
+complete_predicted_demand = np.concatenate([predicted_demand, additional_predicted_demand])
+
+# Sum the total predicted demand from February 1, 2024 to February 14, 2024
+total_demand_feb_1_to_14 = complete_predicted_demand[13:27].sum()
+
+total_demand_feb_1_to_14
+
+
+#LSTM
+
+from sklearn.preprocessing import MinMaxScaler
+
+
+data = combined_product_sales['Qty'].values.reshape(-1, 1)
+scaler = MinMaxScaler(feature_range=(0, 1))
+data_normalized = scaler.fit_transform(data)
+
+# Function to create sequences
+def create_sequences(data, seq_length):
+    xs = []
+    ys = []
+    for i in range(len(data)-seq_length-1):
+        x = data[i:(i+seq_length)]
+        y = data[i+seq_length]
+        xs.append(x)
+        ys.append(y)
+    return np.array(xs), np.array(ys)
+
+seq_length = 10  
+X, y = create_sequences(data_normalized, seq_length)
+
+import torch
+import torch.nn as nn
+
+class LSTMModel(nn.Module):
+    def __init__(self, input_size=1, hidden_layer_size=50, output_size=1):
+        super(LSTMModel, self).__init__()
+        self.hidden_layer_size = hidden_layer_size
+        self.lstm = nn.LSTM(input_size, hidden_layer_size, batch_first=True)
+        self.linear = nn.Linear(hidden_layer_size, output_size)
+
+    def forward(self, x):
+        batch_size, seq_length, _ = x.size()
+        hidden_cell = (torch.zeros(1, batch_size, self.hidden_layer_size),
+                       torch.zeros(1, batch_size, self.hidden_layer_size))
+        lstm_out, hidden_cell = self.lstm(x, hidden_cell)
+        predictions = self.linear(lstm_out[:, -1])
+        return predictions
+
+train_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(torch.tensor(X, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)), batch_size=8, shuffle=True)  # Reduced batch size from 16 to 8
+
+class LSTMModel(nn.Module):
+    def __init__(self, input_size=1, hidden_layer_size=25, output_size=1):  # Reduced hidden_layer_size
+        super(LSTMModel, self).__init__()
+        self.lstm = nn.LSTM(input_size, hidden_layer_size, batch_first=True)
+        self.linear = nn.Linear(hidden_layer_size, output_size)
+
+
+import torch.optim as optim
+
+def train_model(model, train_loader, criterion, optimizer, n_epochs=100):
+    for epoch in range(n_epochs):
+        for sequences, labels in train_loader:
+            optimizer.zero_grad()
+            output = model(sequences)
+            loss = criterion(output, labels)
+            loss.backward()
+            optimizer.step()
+        print(f'Epoch {epoch+1} Loss: {loss.item()}')
+
+criterion = nn.MSELoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+train_model(model, train_loader, criterion, optimizer)
+
+import torch
+from torch.utils.data import TensorDataset, DataLoader
+
+data = combined_product_sales['Qty'].values.reshape(-1, 1)
+scaler = MinMaxScaler(feature_range=(0, 1))
+data_normalized = scaler.fit_transform(data)
+
+def create_sequences(data, seq_length):
+    xs, ys = [], []
+    for i in range(len(data)-seq_length-1):
+        x = data[i:(i+seq_length)]
+        y = data[i+seq_length]
+        xs.append(x)
+        ys.append(y)
+    return np.array(xs), np.array(ys)
+
+seq_length = 10  
+X, y = create_sequences(data_normalized, seq_length)
+
+# Convert to PyTorch tensors
+X_tensor = torch.tensor(X, dtype=torch.float32)
+y_tensor = torch.tensor(y, dtype=torch.float32)
+
+# Create DataLoader for batch processing
+batch_size = 16
+train_loader = DataLoader(TensorDataset(X_tensor, y_tensor), batch_size=batch_size, shuffle=True)
+
+class LSTMModel(nn.Module):
+    def __init__(self, input_size=1, hidden_layer_size=50, output_size=1):
+        super(LSTMModel, self).__init__()
+        self.hidden_layer_size = hidden_layer_size
+        self.lstm = nn.LSTM(input_size, hidden_layer_size, batch_first=True)
+        self.linear = nn.Linear(hidden_layer_size, output_size)
+
+    def forward(self, x):
+        batch_size = x.size(0)
+        hidden_state = torch.zeros(1, batch_size, self.hidden_layer_size)
+        cell_state = torch.zeros(1, batch_size, self.hidden_layer_size)
+        hidden = (hidden_state, cell_state)
+        out, hidden = self.lstm(x, hidden)
+        predictions = self.linear(out[:, -1, :])
+        return predictions
+
+model = LSTMModel()
+
+
+def train_model(model, train_loader, criterion, optimizer, n_epochs=100):
+    for epoch in range(n_epochs):
+        for sequences, labels in train_loader:
+            optimizer.zero_grad()
+            output = model(sequences)
+            loss = criterion(output, labels)
+            loss.backward()
+            optimizer.step()
+        print(f'Epoch {epoch+1} Loss: {loss.item()}')
+
+criterion = nn.MSELoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+train_model(model, train_loader, criterion, optimizer)
+
+def train_model(model, train_loader, criterion, optimizer, n_epochs=100):
+    loss_history = []  # Initialize a list to store the loss values
+    for epoch in range(n_epochs):
+        for sequences, labels in train_loader:
+            optimizer.zero_grad()
+            output = model(sequences)
+            loss = criterion(output, labels)
+            loss.backward()
+            optimizer.step()
+        loss_history.append(loss.item())  # Store the loss for this epoch
+        if epoch % 10 == 0:
+            print(f'Epoch {epoch+1} Loss: {loss.item()}')
+    return loss_history  # Return the list of loss values after training
+
+# Assuming the rest of your setup is correct (model, criterion, optimizer, train_loader)
+loss_history = train_model(model, train_loader, criterion, optimizer)
+
+import matplotlib.pyplot as plt
+
+# Plotting the training loss
+plt.figure(figsize=(10, 5))
+plt.plot(loss_history, label='Training Loss')
+plt.title('Training Loss Over Epochs')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.legend()
+plt.show()
